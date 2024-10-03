@@ -1,9 +1,12 @@
+// src/components/Students.js
+
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { jsPDF } from "jspdf"; // Certifique-se de instalar essa biblioteca
+import { jsPDF } from "jspdf";
+import 'jspdf-autotable';
 
-function Students() {
+const Students = () => {
     const [students, setStudents] = useState([]);
     const [newStudent, setNewStudent] = useState({
         name: '',
@@ -14,6 +17,7 @@ function Students() {
         birthDate: ''
     });
     const [editingStudentId, setEditingStudentId] = useState(null);
+    const [visibleEvaluations, setVisibleEvaluations] = useState({});
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -49,7 +53,7 @@ function Students() {
             if (response.data && !response.data.erro) {
                 setNewStudent(prev => ({
                     ...prev,
-                    address: `${response.data.logradouro}, ` // Preenche o logradouro
+                    address: `${response.data.logradouro}, ${response.data.bairro}, ${response.data.localidade} - ${response.data.uf}` // Endereço completo
                 }));
             } else {
                 alert('CEP inválido!');
@@ -89,7 +93,7 @@ function Students() {
         setEditingStudentId(student.id);
         setNewStudent({
             name: student.name,
-            cep: student.cep,
+            cep: '', // O CEP não está armazenado, então pode ser deixado vazio ou ajustado conforme necessário
             address: student.address,
             phone: student.phone,
             gender: student.gender,
@@ -119,17 +123,64 @@ function Students() {
     const fetchLastEvaluations = async (studentId) => {
         try {
             const response = await axios.get(`http://localhost:5000/evaluations/${studentId}`);
-            if (Array.isArray(response.data)) {
-                return response.data; // Retorna as avaliações se for um array
-            } else {
-                console.error("Resposta inesperada:", response.data);
-                return []; // Retorna um array vazio se não for um array
-            }
+            const { avaliacoes_femininas, avaliacoes_masculinas } = response.data;
+
+            // Combinar as avaliações femininas e masculinas em um único array
+            const combinedEvaluations = [
+                ...avaliacoes_femininas.map(evalFem => ({ ...evalFem, tipo: 'Feminina' })),
+                ...avaliacoes_masculinas.map(evalMasc => ({ ...evalMasc, tipo: 'Masculina' })),
+            ];
+
+            // Ordenar as avaliações por data (assumindo que 'data' está em formato ISO ou semelhante)
+            combinedEvaluations.sort((a, b) => new Date(b.data) - new Date(a.data));
+
+            return combinedEvaluations;
         } catch (error) {
             console.error("Erro ao buscar avaliações:", error);
             alert("Erro ao buscar avaliações.");
-            return []; // Retorna um array vazio em caso de erro
+            return [];
         }
+    };
+
+    const generateComparativeData = (evaluations) => {
+        if (evaluations.length < 2) {
+            return null;
+        }
+
+        const [latest, secondLatest] = evaluations;
+
+        const comparison = {};
+
+        // Lista de campos para comparar com suas respectivas unidades
+        const fieldsToCompare = [
+            { field: 'peso', label: 'Peso (kg)' },
+            { field: 'altura', label: 'Altura (cm)' },
+            { field: 'peitoral', label: 'Peitoral (cm)' },
+            { field: 'axilar_media', label: 'Axilar Média (cm)' },
+            { field: 'triceps', label: 'Tríceps (cm)' },
+            { field: 'subescapular', label: 'Subescapular (cm)' },
+            { field: 'abdomen', label: 'Abdomen (cm)' },
+            { field: 'supra_iliaca', label: 'Supra Iliaca (cm)' },
+            { field: 'coxa', label: 'Coxa (cm)' },
+            { field: 'percentual_gordura', label: 'Percentual de Gordura (%)' },
+            { field: 'percentual_massa_magra', label: 'Percentual de Massa Magra (%)' },
+            { field: 'massa_gordura_kg', label: 'Massa de Gordura (kg)' },
+            { field: 'massa_magra_kg', label: 'Massa Magra (kg)' },
+            { field: 'imc', label: 'IMC' }
+        ];
+
+        fieldsToCompare.forEach(({ field, label }) => {
+            const latestValue = latest[field];
+            const secondValue = secondLatest[field];
+            const difference = latestValue - secondValue;
+            comparison[label] = {
+                latest: latestValue,
+                previous: secondValue,
+                difference: difference.toFixed(2)
+            };
+        });
+
+        return comparison;
     };
 
     const generateEvaluationsPDF = async (student) => {
@@ -137,18 +188,66 @@ function Students() {
         const doc = new jsPDF();
 
         doc.setFontSize(16);
-        doc.text(`Últimas Avaliações de ${student.name}`, 20, 20);
+        doc.text(`Avaliações de ${student.name}`, 20, 20);
 
         if (evaluations.length === 0) {
             doc.setFontSize(12);
             doc.text("Nenhuma avaliação encontrada.", 20, 30);
         } else {
-            let y = 30; // posição inicial no eixo y
-            evaluations.forEach((evaluation, index) => {
-                doc.setFontSize(12);
-                doc.text(`Avaliação ${index + 1}: ${evaluation.data} - ${evaluation.percentual_gordura}% de gordura`, 20, y);
-                y += 10; // Espaçamento entre as linhas
+            // Adicionar todas as avaliações
+            doc.setFontSize(14);
+            doc.text("Todas as Avaliações:", 20, 30);
+            doc.autoTable({
+                startY: 35,
+                head: [['Tipo', 'Data', 'Peso (kg)', 'Altura (cm)', 'Peitoral (cm)', 'Axilar Média (cm)', 'Tríceps (cm)', 'Subescapular (cm)', 'Abdomen (cm)', 'Supra Iliaca (cm)', 'Coxa (cm)', '% Gordura', '% Massa Magra', 'Massa Gordura (kg)', 'Massa Magra (kg)', 'IMC', 'Classificação IMC']],
+                body: evaluations.map(evalItem => ([
+                    evalItem.tipo,
+                    evalItem.data,
+                    `${evalItem.peso} kg`,
+                    `${evalItem.altura} cm`,
+                    `${evalItem.peitoral} cm`,
+                    `${evalItem.axilar_media} cm`,
+                    `${evalItem.triceps} cm`,
+                    `${evalItem.subescapular} cm`,
+                    `${evalItem.abdomen} cm`,
+                    `${evalItem.supra_iliaca} cm`,
+                    `${evalItem.coxa} cm`,
+                    `${evalItem.percentual_gordura} %`,
+                    `${evalItem.percentual_massa_magra} %`,
+                    `${evalItem.massa_gordura_kg} kg`,
+                    `${evalItem.massa_magra_kg} kg`,
+                    evalItem.imc,
+                    evalItem.classificacao_imc
+                ])),
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [78, 204, 196] },
             });
+
+            // Gerar comparativo das duas últimas avaliações
+            const comparison = generateComparativeData(evaluations);
+            if (comparison) {
+                const startY = doc.lastAutoTable.finalY + 10;
+                doc.setFontSize(14);
+                doc.text(`Comparativo das Duas Últimas Avaliações de ${student.name}:`, 20, startY);
+
+                const comparisonTable = Object.keys(comparison).map(label => [
+                    label,
+                    `${comparison[label].previous}${getUnit(label)}`,
+                    `${comparison[label].latest}${getUnit(label)}`,
+                    `${comparison[label].difference}${getDifferenceSign(comparison[label].difference)}`
+                ]);
+
+                doc.autoTable({
+                    startY: startY + 5,
+                    head: [['Campo', 'Anterior', 'Atual', 'Diferença']],
+                    body: comparisonTable,
+                    styles: { fontSize: 8 },
+                    headStyles: { fillColor: [78, 204, 196] },
+                    columnStyles: {
+                        3: { halign: 'right' } // Alinhar a coluna de diferença à direita
+                    }
+                });
+            }
         }
 
         doc.save(`avaliacoes_${student.name}.pdf`);
@@ -159,10 +258,50 @@ function Students() {
         setEditingStudentId(null);
     };
 
+    const toggleEvaluations = async (studentId) => {
+        if (visibleEvaluations[studentId]) {
+            // Se as avaliações já estão visíveis, esconda-as
+            setVisibleEvaluations(prev => ({ ...prev, [studentId]: null }));
+        } else {
+            // Caso contrário, busque as avaliações e mostre-as
+            const evaluations = await fetchLastEvaluations(studentId);
+            const comparison = generateComparativeData(evaluations);
+            setVisibleEvaluations(prev => ({ ...prev, [studentId]: { evaluations, comparison } }));
+        }
+    };
+
+    // Função para obter a unidade de medida com base no campo
+    const getUnit = (fieldLabel) => {
+        const unitMapping = {
+            'Peso (kg)': ' kg',
+            'Altura (cm)': ' cm',
+            'Peitoral (cm)': ' cm',
+            'Axilar Média (cm)': ' cm',
+            'Tríceps (cm)': ' cm',
+            'Subescapular (cm)': ' cm',
+            'Abdomen (cm)': ' cm',
+            'Supra Iliaca (cm)': ' cm',
+            'Coxa (cm)': ' cm',
+            'Percentual de Gordura (%)': ' %',
+            'Percentual de Massa Magra (%)': ' %',
+            'Massa de Gordura (kg)': ' kg',
+            'Massa Magra (kg)': ' kg',
+            'IMC': ''
+        };
+        return unitMapping[fieldLabel] || '';
+    };
+
+    // Função para adicionar sinal de diferença
+    const getDifferenceSign = (difference) => {
+        if (difference > 0) return ' ↑'; // Aumento
+        if (difference < 0) return ' ↓'; // Diminuição
+        return ''; // Sem diferença
+    };
+
     const styles = {
         container: {
-            width: '80%',
-            margin: '0 auto',
+            width: '90%',
+            margin: '20px auto',
             padding: '20px',
             backgroundColor: '#f0f8ff',
             borderRadius: '8px',
@@ -183,17 +322,17 @@ function Students() {
             marginBottom: '20px',
         },
         input: {
-            padding: '15px',
+            padding: '10px 15px',
             border: '1px solid #ccc',
             borderRadius: '4px',
             margin: '5px',
             width: '80%',
             maxWidth: '400px',
-            fontSize: '1.1em',
+            fontSize: '1em',
             transition: 'border-color 0.3s',
         },
         button: {
-            padding: '15px 20px',
+            padding: '10px 20px',
             backgroundColor: '#4ecdc4',
             color: 'white',
             border: 'none',
@@ -211,13 +350,15 @@ function Students() {
         tableHeader: {
             backgroundColor: '#4ecdc4',
             color: 'white',
-            padding: '15px',
+            padding: '10px',
             fontSize: '1.1em',
+            border: '1px solid #ddd',
         },
         tableCell: {
             border: '1px solid #ddd',
-            padding: '15px',
-            fontSize: '1em',
+            padding: '10px',
+            fontSize: '0.9em',
+            verticalAlign: 'top',
         },
         studentItemActive: {
             borderLeft: '5px solid #4caf50',
@@ -226,15 +367,42 @@ function Students() {
             borderLeft: '5px solid #f44336',
         },
         studentButton: {
-            marginLeft: '10px',
-            padding: '10px 15px',
+            marginLeft: '5px',
+            padding: '8px 12px',
             backgroundColor: '#007bff',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
             cursor: 'pointer',
             transition: 'background-color 0.3s',
-            fontSize: '1em',
+            fontSize: '0.9em',
+        },
+        evaluationsContainer: {
+            marginTop: '10px',
+            padding: '10px',
+            backgroundColor: '#e8f4f8',
+            borderRadius: '4px',
+        },
+        evaluationTable: {
+            width: '100%',
+            borderCollapse: 'collapse',
+            marginTop: '10px',
+        },
+        comparativeSection: {
+            marginTop: '20px',
+            padding: '10px',
+            backgroundColor: '#fff3cd',
+            borderRadius: '4px',
+        },
+        comparativeTable: {
+            width: '100%',
+            borderCollapse: 'collapse',
+            marginTop: '10px',
+        },
+        sectionTitle: {
+            fontSize: '1.2em',
+            marginBottom: '10px',
+            color: '#333',
         },
     };
 
@@ -305,22 +473,129 @@ function Students() {
                 </thead>
                 <tbody>
                     {students.map(student => (
-                        <tr key={student.id} style={student.active ? styles.studentItemActive : styles.studentItemInactive}>
-                            <td style={styles.tableCell}>{student.name}</td>
-                            <td style={styles.tableCell}>{student.age}</td>
-                            <td style={styles.tableCell}>{student.gender}</td>
-                            <td style={styles.tableCell}>
-                                <button style={styles.studentButton} onClick={() => handleEditClick(student)}>Editar</button>
-                                <button style={styles.studentButton} onClick={() => deleteStudent(student.id)}>Excluir</button>
-                                <button style={styles.studentButton} onClick={() => handleAddEvaluation(student)}>Adicionar Avaliação</button>
-                                <button style={styles.studentButton} onClick={() => generateEvaluationsPDF(student)}>Gerar PDF</button>
-                            </td>
-                        </tr>
+                        <React.Fragment key={student.id}>
+                            <tr style={student.active ? styles.studentItemActive : styles.studentItemInactive}>
+                                <td style={styles.tableCell}>{student.name}</td>
+                                <td style={styles.tableCell}>{student.age}</td>
+                                <td style={styles.tableCell}>{student.gender}</td>
+                                <td style={styles.tableCell}>
+                                    <button style={styles.studentButton} onClick={() => handleEditClick(student)}>Editar</button>
+                                    <button style={styles.studentButton} onClick={() => deleteStudent(student.id)}>Excluir</button>
+                                    <button style={styles.studentButton} onClick={() => handleAddEvaluation(student)}>Adicionar Avaliação</button>
+                                    <button style={styles.studentButton} onClick={() => generateEvaluationsPDF(student)}>Gerar PDF</button>
+                                    <button style={styles.studentButton} onClick={() => toggleEvaluations(student.id)}>
+                                        {visibleEvaluations[student.id] ? 'Ocultar Avaliações' : 'Ver Avaliações'}
+                                    </button>
+                                </td>
+                            </tr>
+                            {visibleEvaluations[student.id] && (
+                                <tr>
+                                    <td colSpan="4" style={styles.tableCell}>
+                                        <div style={styles.evaluationsContainer}>
+                                            <h4>Avaliações:</h4>
+                                            {visibleEvaluations[student.id].evaluations.length === 0 ? (
+                                                <p>Nenhuma avaliação encontrada.</p>
+                                            ) : (
+                                                <>
+                                                    {/* Tabela de Avaliações */}
+                                                    <table style={styles.evaluationTable}>
+                                                        <thead>
+                                                            <tr>
+                                                                <th style={styles.tableHeader}>Tipo</th>
+                                                                <th style={styles.tableHeader}>Data</th>
+                                                                <th style={styles.tableHeader}>Peso (kg)</th>
+                                                                <th style={styles.tableHeader}>Altura (cm)</th>
+                                                                <th style={styles.tableHeader}>% Gordura (%)</th>
+                                                                <th style={styles.tableHeader}>IMC</th>
+                                                                {/* Adicione mais colunas conforme necessário */}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {visibleEvaluations[student.id].evaluations.map(evaluation => (
+                                                                <tr key={evaluation.id}>
+                                                                    <td style={styles.tableCell}>{evaluation.tipo}</td>
+                                                                    <td style={styles.tableCell}>{evaluation.data}</td>
+                                                                    <td style={styles.tableCell}>{evaluation.peso} kg</td>
+                                                                    <td style={styles.tableCell}>{evaluation.altura} cm</td>
+                                                                    <td style={styles.tableCell}>{evaluation.percentual_gordura} %</td>
+                                                                    <td style={styles.tableCell}>{evaluation.imc}</td>
+                                                                    {/* Adicione mais células conforme necessário */}
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+
+                                                    {/* Comparativo das Duas Últimas Avaliações */}
+                                                    {visibleEvaluations[student.id].comparison && (
+                                                        <div style={styles.comparativeSection}>
+                                                            <h4>Comparativo das Duas Últimas Avaliações de {student.name}:</h4>
+                                                            <table style={styles.comparativeTable}>
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th style={styles.tableHeader}>Campo</th>
+                                                                        <th style={styles.tableHeader}>Anterior</th>
+                                                                        <th style={styles.tableHeader}>Atual</th>
+                                                                        <th style={styles.tableHeader}>Diferença</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {Object.keys(visibleEvaluations[student.id].comparison).map((field, index) => (
+                                                                        <tr key={index}>
+                                                                            <td style={styles.tableCell}>{field}</td>
+                                                                            <td style={styles.tableCell}>{visibleEvaluations[student.id].comparison[field].previous}{getUnit(field)}</td>
+                                                                            <td style={styles.tableCell}>{visibleEvaluations[student.id].comparison[field].latest}{getUnit(field)}</td>
+                                                                            <td style={{
+                                                                                ...styles.tableCell,
+                                                                                color: visibleEvaluations[student.id].comparison[field].difference > 0 ? '#4caf50' : visibleEvaluations[student.id].comparison[field].difference < 0 ? '#f44336' : '#000'
+                                                                            }}>
+                                                                                {visibleEvaluations[student.id].comparison[field].difference}{getDifferenceSign(visibleEvaluations[student.id].comparison[field].difference)}
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </React.Fragment>
                     ))}
                 </tbody>
             </table>
         </div>
     );
-}
+};
+
+// Função para obter a unidade de medida com base no campo
+const getUnit = (fieldLabel) => {
+    const unitMapping = {
+        'Peso (kg)': ' kg',
+        'Altura (cm)': ' cm',
+        'Peitoral (cm)': ' cm',
+        'Axilar Média (cm)': ' cm',
+        'Tríceps (cm)': ' cm',
+        'Subescapular (cm)': ' cm',
+        'Abdomen (cm)': ' cm',
+        'Supra Iliaca (cm)': ' cm',
+        'Coxa (cm)': ' cm',
+        'Percentual de Gordura (%)': ' %',
+        'Percentual de Massa Magra (%)': ' %',
+        'Massa de Gordura (kg)': ' kg',
+        'Massa Magra (kg)': ' kg',
+        'IMC': ''
+    };
+    return unitMapping[fieldLabel] || '';
+};
+
+// Função para adicionar sinal de diferença
+const getDifferenceSign = (difference) => {
+    if (difference > 0) return ' ↑'; // Aumento
+    if (difference < 0) return ' ↓'; // Diminuição
+    return ''; // Sem diferença
+};
 
 export default Students;
