@@ -1,6 +1,6 @@
 // src/components/Students.js
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { jsPDF } from "jspdf";
@@ -18,10 +18,11 @@ const Students = () => {
     });
     const [editingStudentId, setEditingStudentId] = useState(null);
     const [visibleEvaluations, setVisibleEvaluations] = useState({});
+    const [studentName, setStudentName] = useState('');
+
     const navigate = useNavigate();
 
-    useEffect(() => {
-        // Obter alunos do servidor
+    const getStudents = useCallback(() => {
         axios.get('http://localhost:5000/students')
             .then(response => {
                 const studentsWithAge = response.data.map(student => ({
@@ -34,6 +35,11 @@ const Students = () => {
                 alert('Erro ao carregar alunos.');
                 console.error(error);
             });
+    },[])
+
+    useEffect(() => {
+        getStudents();
+        
     }, []);
 
     const calculateAge = (birthDate) => {
@@ -270,6 +276,26 @@ const Students = () => {
         }
     };
 
+    const handleSearchChange = (e) => {
+        setStudentName(e.target.value);
+        axios.get(`http://localhost:5000/search/${e.target.value}`,)
+            .then(response => {
+                const studentsWithAge = response.data.map(student => ({
+                    ...student,
+                    age: calculateAge(student.birthDate)
+                }));
+                studentsWithAge.length==0 ? setStudents([]) : setStudents(studentsWithAge);
+
+            })
+            .catch(error => {
+                getStudents();
+                
+                console.error(error);
+            });
+        
+
+    };
+
     // Função para obter a unidade de medida com base no campo
     const getUnit = (fieldLabel) => {
         const unitMapping = {
@@ -404,6 +430,19 @@ const Students = () => {
             marginBottom: '10px',
             color: '#333',
         },
+        searchContainer: {
+            display: 'flex',
+            alignItems: 'center',
+            marginBottom: '20px',
+            flexDirection: 'column',
+        },
+        searchInput: {
+            padding: '10px',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            fontSize: '1em',
+            width: '300px',
+        }
     };
 
     return (
@@ -462,6 +501,20 @@ const Students = () => {
                     {editingStudentId ? 'Atualizar Aluno' : 'Adicionar Aluno'}
                 </button>
             </div>
+
+            <div style={styles.searchContainer} >
+            <h2 style={styles.title}>Buscar Avaliações por Nome do Aluno</h2>
+                <input
+                    style={styles.input}
+                    type="text"
+                    placeholder="Nome do Aluno"
+                    value={studentName}
+                    onChange={e => handleSearchChange(e)}
+                    
+                />
+           
+            </div>
+
             <table style={styles.studentTable}>
                 <thead>
                     <tr>

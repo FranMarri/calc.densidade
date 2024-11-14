@@ -130,6 +130,14 @@ app.get('/students', (req, res) => {
     });
 });
 
+app.get('/search/:search', (req, res) => {
+    console.log(req.params.search);
+    db.all(`SELECT * FROM students WHERE name LIKE '%${req.params.search}%'`, (err, rows) => {
+        if (err) return res.status(500).send("Erro ao obter alunos.");
+        res.status(200).send(rows);
+    });
+});
+
 app.put('/students/:id', (req, res) => {
     const { name, address, phone, gender, birthDate, active } = req.body;
     db.run(`UPDATE students SET name = ?, address = ?, phone = ?, gender = ?, birthDate = ?, active = ? WHERE id = ?`, 
